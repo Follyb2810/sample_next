@@ -1,0 +1,187 @@
+npm install --save @openzeppelin/contracts
+npx hardhat compile
+npx hardhat run scripts/deploy.js --network <your-network>
+
+npx create-next-app nft-minter
+cd nft-minter
+npm install ethers
+//# .env.local
+NEXT_PUBLIC_CONTRACT_ADDRESS=<Your_Contract_Address>
+NEXT_PUBLIC_RPC_URL=<Your_RPC_URL>
+import { useState, useEffect } from "react";
+import { ethers } from "ethers";
+
+export default function Home() {
+  const [provider, setProvider] = useState(null);
+  const [signer, setSigner] = useState(null);
+  const [contract, setContract] = useState(null);
+  const [mintPrice, setMintPrice] = useState(0.5);
+  const [maxSupply, setMaxSupply] = useState(0);
+  const [currentSupply, setCurrentSupply] = useState(0);
+
+  const contractAddress = process.env.NEXT_PUBLIC_CONTRACT_ADDRESS;
+  const abi = [
+    "function mintPrice() view returns (uint256)",
+    "function maxSupply() view returns (uint256)",
+    "function totalSupply() view returns (uint256)",
+    "function mint() payable",
+    "function setMintPrice(uint256) onlyOwner",
+  ];
+
+  useEffect(() => {
+    const init = async () => {
+      if (window.ethereum) {
+        const provider = new ethers.providers.Web3Provider(window.ethereum);
+        setProvider(provider);
+
+        const signer = provider.getSigner();
+        setSigner(signer);
+
+        const contractInstance = new ethers.Contract(contractAddress, abi, signer);
+        setContract(contractInstance);
+
+        const price = await contractInstance.mintPrice();
+        setMintPrice(ethers.utils.formatEther(price));
+
+        const supply = await contractInstance.maxSupply();
+        setMaxSupply(supply.toNumber());
+
+        const current = await contractInstance.totalSupply();
+        setCurrentSupply(current.toNumber());
+      }
+    };
+    init();
+  }, []);
+
+  const connectWallet = async () => {
+    if (window.ethereum) {
+      await window.ethereum.request({ method: "eth_requestAccounts" });
+      window.location.reload();
+    }
+  };
+
+  const mintNFT = async () => {
+    if (contract) {
+      try {
+        const tx = await contract.mint({ value: ethers.utils.parseEther(mintPrice.toString()) });
+        await tx.wait();
+        alert("NFT minted successfully!");
+        window.location.reload();
+      } catch (error) {
+        console.error(error);
+        alert("Minting failed. Please check your wallet.");
+      }
+    }
+  };
+
+  const updateMintPrice = async (newPrice) => {
+    if (contract) {
+      try {
+        const tx = await contract.setMintPrice(ethers.utils.parseEther(newPrice));
+        await tx.wait();
+        alert("Mint price updated successfully!");
+        window.location.reload();
+      } catch (error) {
+        console.error(error);
+        alert("Failed to update mint price.");
+      }
+    }
+  };
+
+  return (
+    <div style={{ padding: "20px" }}>
+      <h1>NFT Minter</h1>
+
+      {!provider && (
+        <button onClick={connectWallet}>Connect Wallet</button>
+      )}
+
+      {provider && (
+        <>
+          <p>Current Mint Price: {mintPrice} ETH</p>
+          <p>Max Supply: {maxSupply}</p>
+          <p>Current Supply: {currentSupply}</p>
+
+          <button onClick={mintNFT}>Mint NFT</button>
+
+          <br />
+          <br />
+
+          <input
+            type="number"
+            placeholder="New Mint Price (ETH)"
+            onChange={(e) => setMintPrice(e.target.value)}
+          />
+          <button onClick={() => updateMintPrice(mintPrice)}>Update Mint Price</button>
+        </>
+      )}
+    </div>
+  );
+}
+import { useState } from "react";
+import { motion } from "framer-motion";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { useAccount, useContractWrite } from "wagmi";
+import { NFT_CONTRACT_ADDRESS, NFT_ABI } from "@/config";
+import Image from "next/image";
+
+export default function MintNFT() {
+  const [file, setFile] = useState<File | null>(null);
+  const [minting, setMinting] = useState(false);
+  const [creatorOnly, setCreatorOnly] = useState(false);
+  const { address, isConnected } = useAccount();
+
+  const { writeAsync } = useContractWrite({
+    address: NFT_CONTRACT_ADDRESS,
+    abi: NFT_ABI,
+    functionName: "mint",
+  });
+
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (event.target.files) {
+      setFile(event.target.files[0]);
+    }
+  };
+
+  const handleMint = async () => {
+    if (!file) return alert("Please upload an image");
+    if (!isConnected) return alert("Connect your wallet");
+    
+    try {
+      setMinting(true);
+      // Upload image to IPFS or Cloudinary (mocked here)
+      const imageUrl = "https://your-ipfs-url.com/" + file.name;
+
+      // Call smart contract mint function
+      await writeAsync({ args: [imageUrl, creatorOnly] });
+      alert("NFT Minted Successfully!");
+    } catch (error) {
+      console.error(error);
+      alert("Minting failed");
+    } finally {
+      setMinting(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col items-center justify-center min-h-screen bg-gray-900 text-white p-6">
+      <motion.div
+        initial={{ opacity: 0, y: -10 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="bg-gray-800 p-6 rounded-lg shadow-xl w-full max-w-md"
+      >
+        <h1 className="text-xl font-bold mb-4">Mint Your NFT</h1>
+        <Input type="file" accept="image/*" onChange={handleFileChange} />
+        {file && <Image src={URL.createObjectURL(file)} alt="Preview" width={100} height={100} className="mt-4 rounded-lg" />}
+        <label className="flex items-center gap-2 mt-4">
+          <input type="checkbox" checked={creatorOnly} onChange={() => setCreatorOnly(!creatorOnly)} />
+          Only creator can mint
+        </label>
+        <Button onClick={handleMint} className="w-full mt-4" disabled={minting}>
+          {minting ? "Minting..." : "Mint NFT"}
+        </Button>
+      </motion.div>
+    </div>
+  );
+}
